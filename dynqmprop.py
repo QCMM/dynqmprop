@@ -10,13 +10,15 @@ from simtk.openmm import app
 
 class DynQMProp(object):
 
-    def __init__(self, top_file, coords_file, qm_charge=0, parmed_selection=f':1', radius=10, n_charge_updates=3, sampling_time=25, total_qm_calculations=100, method='B3LYP', basis='def2-TZVP'):
+    def __init__(self, top_file, coords_file, qm_charge=0, ligand_selection=f':1', receptor_selection=None, radius=10, n_charge_updates=3, sampling_time=25, total_qm_calculations=100, method='B3LYP', basis='def2-TZVP'):
 
         self.top_file = top_file
         self.coords_file = coords_file
         self.qm_charge = qm_charge  # total qm charge
         # residue index for molecule to calculate charges
-        self.parmed_selection = parmed_selection
+        self.ligand_selection = ligand_selection
+        if receptor_selection is not None:
+            self.receptor_selection = receptor_selection
         self.radius = radius
         self.n_charge_updates = n_charge_updates
         self.sampling_time = sampling_time  # sampling time in ns
@@ -25,13 +27,19 @@ class DynQMProp(object):
         self.basis = basis
 
         if self.top_file.endswith(".top"):
-            self.top_format = "Gromacs"
+            self.top_format = "gromacs"
             self._gromacs_top_path = '/opt/easybuild/software/GROMACS/2019.3-foss-2019a/share/gromacs/top'
             pmd.gromacs.GROMACS_TOPDIR = self._gromacs_top_path
             self.coords = app.gromacsgrofile.GromacsGroFile(self.coords_file)
             self.box_vectors = self.coords.getPeriodicBoxVectors()
             self.top = app.gromacstopfile.GromacsTopFile(
                 self.top_file, periodicBoxVectors=self.box_vectors, includeDir=self._gromacs_top_path)
+        elif self.top_file.endswith(".prmtop"):
+            self.top_format = "amber"
+            self.coords = app.amberinpcrdfile.AmberInpcrdFile(self.coords_file)
+            self.box_vectors = self.coords.boxVectors
+            self.top = app.amberprmtopfile.AmberPrmtopFile(self.top_file)
+
         else:
             raise Exception(
                 'Topology not implemented ...')
@@ -50,34 +58,49 @@ class DynQMProp(object):
         charges_std_out.write('#index \n')
         return charges_out, charges_std_out, epol_out
 
-    def run(self, charges_out, charges_std_out, epol_out):
+    def run(self, charges_out, charges_std_out, epol_out, compl=False):
 
         begin_time = time.time()
+        if compl:
+            print('Setting restraints ...')
+            restraint = True
+            ligand_atom_list, receptor_atom_list = mdt.set_restrained_atoms(
+                self.top_file, self.coords_file, self.ligand_selection, self.receptor_selection)
         shutil.copyfile(self.top_file, f'{self.top_file}.old')
-        for j in range(self.n_charge_updates):
+        if self.top_format == 'amber':
+            b_vectors = self.box_vectors
+        else:
+            b_vectors = None
+        for update in range(self.n_charge_updates):
             # list to store charges and polarization energies for each update
             charge_list = []
             epol_list = []
-            # Creating OpeMM simulation class
-            if j == 0:
+            # creating OpenMM simulation class
+            if update == 0:
                 positions = self.coords.positions
-            simulation, system = mdt.setup_simulation(
-                self.top, positions, j)
-            # Starting loop to calculate atomic charges from different conformations
+            if compl:
+                simulation, system = mdt.setup_simulation(
+                    self.top, positions, update, b_vectors, restraint, ligand_atom_list, receptor_atom_list)
+            else:
+                simulation, system = mdt.setup_simulation(
+                    self.top, positions, update, b_vectors)
+            # starting loop to calculate atomic charges from different conformations
             qm_calculations = int(
-                self.total_qm_calculations / self.n_charge_updates) * (j + 1)
+                self.total_qm_calculations / self.n_charge_updates) * (update + 1)
             for i in range(qm_calculations):
                 step = int(self.sampling_time * 500000 / qm_calculations)
                 simulation.step(step)
                 # calculate charges and polarization energy for current configuration
                 print('Calculating charges ...')
                 positions, epol, charges = mdt.calculate_charges(
-                    simulation, system, self.parmed_selection, self.qm_charge, self.radius, self.method, self.basis)
+                    simulation, system, self.ligand_selection, self.qm_charge, self.radius, self.method, self.basis)
                 epol_list.append(epol)
                 charge_list.append(charges)
+            new_charges, new_charges_std = mdt.charge_stats(charge_list)
+            epol_mean, epol_std = mdt.epol_stats(epol_list)
             print('Creating new topology ...')
-            self.top, new_charges, new_charges_std, epol_mean, epol_std = mdt.make_new_top(
-                self.top_file, self.box_vectors, charge_list, epol_list, self.parmed_selection)
+            self.top = mdt.make_new_top(
+                self.top_file, self.box_vectors, new_charges, self.ligand_selection)
             for i in range(len(new_charges)):
                 charges_out.write(f'{new_charges[i]:.5f}  ')
                 charges_std_out.write(f'{new_charges_std[i]:.5f}  ')
@@ -92,7 +115,7 @@ class DynQMProp(object):
         epol_out.close
         return
 
-    def validation(self, parm=None, parm_vals=[], overwrite=False):
+    def validation(self, parm=None, parm_vals=[], overwrite=False, compl=False):
 
         parm_opt = ['radius', 'sampling_time',
                     'n_charge_updates', 'total_qm_calculations', 'method', 'basis']
@@ -102,15 +125,15 @@ class DynQMProp(object):
         else:
             raise Exception(
                 '''Usage:
-                    parm: str ('radius', 'sampling_time', 'n_charge_updates', 'total_qm_calculations', 'method', 'basis')
-                    parm_vals: list
-                    ''')
+                        parm: str ('radius', 'sampling_time', 'n_charge_updates', 'total_qm_calculations', 'method', 'basis')
+                        parm_vals: list
+                        ''')
 
         for val in parm_dict[parm]:
             if parm == 'radius':
-                self.radius = int(val)
+                self.radius = float(val)
             elif parm == 'sampling_time':
-                self.sampling_time = int(val)
+                self.sampling_time = float(val)
             elif parm == 'total_qm_calculations':
                 self.total_qm_calculations = int(val)
             elif parm == 'method':
@@ -137,6 +160,6 @@ class DynQMProp(object):
                             f'{parm_dir}/calculate_charges.py')
             os.chdir(parm_dir)
             charges_out, charges_std_out, epol_out = self.set_output_files()
-            self.run(charges_out, charges_std_out, epol_out)
+            self.run(charges_out, charges_std_out, epol_out, compl)
             os.chdir('..')
         return
