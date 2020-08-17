@@ -1,4 +1,6 @@
+import warnings
 import mdtraj
+import sys
 
 import parmed as pmd
 import numpy as np
@@ -6,11 +8,13 @@ import numpy as np
 from parmed.tools import change
 from openmmtools import forces
 from qmhub import *
-from get_charges import *
+from dynqmprop.ffparams import ForceFieldParams
 from simtk.openmm import openmm
 from simtk.openmm import app
 from simtk import unit
 
+# avoid warnings
+warnings.filterwarnings('ignore')
 
 def set_restrained_atoms(top_file, coords_file, ligand_selection, receptor_selection):
 
@@ -84,7 +88,10 @@ def calculate_charges(simulation, system, ligand_selection, qm_charge, radius=10
     qmmm.run_qm(method=method, basis=basis, calc_forces=False)
     qmmm.parse_output()
     epol = qmmm.system.qm_atoms.qm_pol_energy
-    charges = get_charges('orca.molden.input', 'mbis')
+    params = ForceFieldParams('orca.molden.input')
+    params.set_molgrid()
+    params.do_partitioning(method='mbis')
+    charges = params.get_charges()
     return positions, epol, charges
 
 
@@ -109,7 +116,7 @@ def make_new_top(top_file, box_vectors, charges_mean, ligand_selection):
     _top.box_vectors = box_vectors
     for i, atom in enumerate(_top[ligand_selection].atoms):
         mask = f'{ligand_selection}&@{atom.name}'
-        action = change(_top, mask, 'charge', round(charges_mean[i], 5))
+        action = change(_top, mask, 'charge', round(charges_mean[i], 6))
         action.execute()
     _top.save(top_file, overwrite=True)
     return _top
