@@ -1,4 +1,4 @@
-# nbfftool
+# dynqmprop
 
 Repository for test development of ffparaim. Internal use only.
 This repo has 3 branches explained below:
