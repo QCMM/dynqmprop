@@ -1,8 +1,5 @@
 # dynqmprop
 
-Repository for test development of ffparaim. Internal use only.
-This repo has 3 branches explained below:
+Python pipeline for environment specific D-MBIS atomic charges.
 
-1. freesolv: Code used in D-MBIS atomic charges for hydration free energy calculations of FreeSolv data subset. Version 0.6.
-2. host-guest: Code used in D-MBIS atomic charge calculations for cb7-set1, cb7-set2 and SAMPL8 challenge. Version 0.9.
-3. horton3: Code refactoring for implementation of HORTON3, removing Python 2 dependency. 
+This code was used in D-MBIS atomic charges derivation for cb7-set1, cb7-set2 and SAMPL8 challenge. Version 0.9.
