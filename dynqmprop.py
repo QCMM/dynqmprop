@@ -2,21 +2,20 @@ import time
 import os
 import shutil
 
-import dynqmprop.mdtools as mdt
+import mdtools as mdt
 import parmed as pmd
 
 from simtk.openmm import app
 
+
 class DynQMProp(object):
 
-    def __init__(self, top_file, coords_file, qm_charge=0, ligand_selection=f':1', receptor_selection=None,
-                 radius=10, n_charge_updates=3, sampling_time=25, total_qm_calculations=100, method='B3LYP',
-                 basis='def2-TZVP'):
+    def __init__(self, top_file, coords_file, qm_charge=0, ligand_selection=f':1', receptor_selection=None, radius=10, n_charge_updates=3, sampling_time=25, total_qm_calculations=100, method='B3LYP', basis='def2-TZVP'):
 
         self.top_file = top_file
         self.coords_file = coords_file
         self.qm_charge = qm_charge  # total qm charge
-        # Residue index for molecule to calculate charges
+        # residue index for molecule to calculate charges
         self.ligand_selection = ligand_selection
         if receptor_selection is not None:
             self.receptor_selection = receptor_selection
@@ -93,8 +92,8 @@ class DynQMProp(object):
                 simulation.step(step)
                 # calculate charges and polarization energy for current configuration
                 print('Calculating charges ...')
-                positions, epol, charges = mdt.calculate_charges(simulation, system, self.ligand_selection,
-                                                                 self.qm_charge, self.radius, self.method, self.basis)
+                positions, epol, charges = mdt.calculate_charges(
+                    simulation, system, self.ligand_selection, self.qm_charge, self.radius, self.method, self.basis)
                 epol_list.append(epol)
                 charge_list.append(charges)
             new_charges, new_charges_std = mdt.charge_stats(charge_list)
@@ -103,8 +102,8 @@ class DynQMProp(object):
             self.top = mdt.make_new_top(
                 self.top_file, self.box_vectors, new_charges, self.ligand_selection)
             for i in range(len(new_charges)):
-                charges_out.write(f'{new_charges[i]:.6f}  ')
-                charges_std_out.write(f'{new_charges_std[i]:.6f}  ')
+                charges_out.write(f'{new_charges[i]:.5f}  ')
+                charges_std_out.write(f'{new_charges_std[i]:.5f}  ')
             charges_out.write('\n')
             charges_std_out.write('\n')
             epol_out.write(f'{epol_mean:.3f}  {epol_std:.3f}\n')
